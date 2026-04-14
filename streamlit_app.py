@@ -8,6 +8,7 @@ import streamlit as st
 from playwright.sync_api import sync_playwright
 import time
 import re
+from urllib.parse import urlparse
 
 st.set_page_config(page_title="Screenshot SaaS", layout="wide")
 
@@ -20,9 +21,17 @@ urls_input = st.text_area(
     placeholder="https://example.com\nhttps://google.com"
 )
 
-def clean_name(url):
-    return re.sub(r'[^a-zA-Z0-9]', '_', url)[:50]
+# ✅ 사이트 이름 추출 (파일명용)
+def get_site_name(url):
+    try:
+        domain = urlparse(url).netloc
+        domain = domain.replace("www.", "")
+        name = domain.split(".")[0]
+        return re.sub(r'[^a-zA-Z0-9]', '', name)
+    except:
+        return "screenshot"
 
+# 팝업 제거
 def close_popups(page):
     texts = ["accept", "agree", "got it", "close", "확인", "동의"]
     for text in texts:
@@ -36,6 +45,7 @@ def close_popups(page):
     except:
         pass
 
+# 자동 스크롤
 def auto_scroll(page):
     try:
         page.evaluate("""
@@ -57,6 +67,7 @@ def auto_scroll(page):
     except:
         pass
 
+# 캡처 함수
 def capture_urls(urls):
     results = []
     os.makedirs("screenshots", exist_ok=True)
@@ -71,9 +82,12 @@ def capture_urls(urls):
             ]
         )
 
-        for url in urls:
+        for i, url in enumerate(urls):
             try:
-                page = browser.new_page(viewport={"width": 1920, "height": 1080})
+                page = browser.new_page(
+                    viewport={"width": 1920, "height": 1080}
+                )
+
                 page.goto(url, timeout=60000)
 
                 try:
@@ -88,7 +102,8 @@ def capture_urls(urls):
 
                 time.sleep(1)
 
-                filename = clean_name(url) + ".png"
+                # ✅ 사이트명 + 순번으로 파일명 생성
+                filename = f"{get_site_name(url)}_{i+1}.png"
                 path = f"screenshots/{filename}"
 
                 page.screenshot(path=path, full_page=True)
@@ -104,6 +119,7 @@ def capture_urls(urls):
     return results
 
 
+# 버튼 실행
 if st.button("🚀 캡처 시작"):
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
 
