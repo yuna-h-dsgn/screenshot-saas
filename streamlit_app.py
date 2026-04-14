@@ -21,7 +21,7 @@ urls_input = st.text_area(
     placeholder="https://example.com\nhttps://google.com"
 )
 
-# ✅ 사이트 이름 추출 (파일명용)
+# ✅ 사이트 이름 추출
 def get_site_name(url):
     try:
         domain = urlparse(url).netloc
@@ -82,7 +82,6 @@ def capture_urls(urls):
             ]
         )
 
-        # ✅ context 사용 (HTTPS 무시 + UA 설정)
         context = browser.new_context(
             ignore_https_errors=True,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
@@ -90,10 +89,12 @@ def capture_urls(urls):
 
         for i, url in enumerate(urls):
             try:
+                st.info(f"🔄 처리 중: {url}")
+
                 page = context.new_page()
                 page.set_viewport_size({"width": 1920, "height": 1080})
 
-                # ✅ 로딩 안정화
+                # 🔥 핵심: 로딩 안정화
                 page.goto(url, timeout=60000, wait_until="domcontentloaded")
 
                 try:
@@ -101,14 +102,13 @@ def capture_urls(urls):
                 except:
                     pass
 
-                time.sleep(2)
+                time.sleep(3)
 
                 close_popups(page)
                 auto_scroll(page)
 
-                time.sleep(1)
+                time.sleep(2)
 
-                # ✅ 사이트명 + 순번 파일명
                 filename = f"{get_site_name(url)}_{i+1}.png"
                 path = f"screenshots/{filename}"
 
@@ -116,9 +116,13 @@ def capture_urls(urls):
                 page.close()
 
                 results.append((url, path))
+                st.success(f"✅ 성공: {url}")
 
             except Exception as e:
                 results.append((url, None))
+
+                # 🔥 핵심: 에러 표시
+                st.error(f"❌ {url} 실패: {e}")
                 print(f"ERROR: {url} -> {e}")
 
         browser.close()
