@@ -1,74 +1,64 @@
 import os
 
-# 🔥 Cloud 환경에서 Playwright 브라우저 자동 설치
 if not os.path.exists("/home/appuser/.cache/ms-playwright"):
     os.system("playwright install chromium")
 
 import streamlit as st
 from playwright.sync_api import sync_playwright
 import time
-import re
 from urllib.parse import urlparse
+from PIL import Image
 
 st.set_page_config(page_title="Screenshot SaaS", layout="wide")
 
 st.title("📸 Screenshot SaaS")
-st.caption("여러 웹사이트를 한 번에 캡처합니다")
+st.caption("무거운 사이트까지 완벽 캡처")
 
-urls_input = st.text_area(
-    "URL 입력 (줄바꿈으로 여러 개 입력)",
-    height=200,
-    placeholder="https://example.com\nhttps://google.com"
-)
+urls_input = st.text_area("URL 입력", height=200)
 
-# ✅ 사이트 이름 추출
 def get_site_name(url):
-    try:
-        domain = urlparse(url).netloc
-        domain = domain.replace("www.", "")
-        name = domain.split(".")[0]
-        return re.sub(r'[^a-zA-Z0-9]', '', name)
-    except:
-        return "screenshot"
+    return urlparse(url).netloc.replace("www.", "").split(".")[0]
 
-# 팝업 제거
-def close_popups(page):
-    texts = ["accept", "agree", "got it", "close", "확인", "동의"]
-    for text in texts:
-        try:
-            page.locator(f"text={text}").first.click(timeout=1000)
-        except:
-            pass
+# 🔥 핵심: 분할 캡처 함수
+def fullpage_screenshot(page, path):
+    total_height = page.evaluate("document.body.scrollHeight")
+    viewport_height = page.viewport_size["height"]
 
-    try:
-        page.keyboard.press("Escape")
-    except:
-        pass
+    screenshots = []
+    y = 0
+    index = 0
 
-# 자동 스크롤
-def auto_scroll(page):
-    try:
-        page.evaluate("""
-        async () => {
-            await new Promise(resolve => {
-                let totalHeight = 0;
-                let distance = 500;
-                let timer = setInterval(() => {
-                    window.scrollBy(0, distance);
-                    totalHeight += distance;
-                    if(totalHeight >= document.body.scrollHeight){
-                        clearInterval(timer);
-                        resolve();
-                    }
-                }, 200);
-            });
-        }
-        """)
-    except:
-        pass
+    while y < total_height:
+        page.evaluate(f"window.scrollTo(0, {y})")
+        time.sleep(1)
 
-# 캡처 함수
-def capture_urls(urls):
+        file = f"{path}_{index}.png"
+        page.screenshot(path=file)
+        screenshots.append(file)
+
+        y += viewport_height
+        index += 1
+
+    # 🔥 이미지 합치기
+    images = [Image.open(img) for img in screenshots]
+
+    total_width = images[0].width
+    total_height = sum(img.height for img in images)
+
+    final_image = Image.new("RGB", (total_width, total_height))
+
+    y_offset = 0
+    for img in images:
+        final_image.paste(img, (0, y_offset))
+        y_offset += img.height
+
+    final_image.save(path)
+
+    # 임시 파일 삭제
+    for img in screenshots:
+        os.remove(img)
+
+def capture(urls):
     results = []
     os.makedirs("screenshots", exist_ok=True)
 
@@ -78,91 +68,57 @@ def capture_urls(urls):
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
+                "--disable-gpu",
             ]
         )
 
         context = browser.new_context(
-            ignore_https_errors=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+            viewport={"width": 1920, "height": 1080},
+            ignore_https_errors=True
         )
 
         for i, url in enumerate(urls):
             try:
-                st.info(f"🔄 처리 중: {url}")
+                st.info(f"🔄 {url}")
 
                 page = context.new_page()
-                page.set_viewport_size({"width": 1920, "height": 1080})
 
-                # 🔥 핵심: 로딩 안정화
-                page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                page.goto(url, timeout=60000, wait_until="networkidle")
 
-                try:
-                    page.wait_for_load_state("networkidle", timeout=10000)
-                except:
-                    pass
-
-                time.sleep(3)
-
-                close_popups(page)
-                auto_scroll(page)
-
+                # 🔥 lazy load 강제 실행
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2)
+                page.evaluate("window.scrollTo(0, 0)")
                 time.sleep(2)
 
-                filename = f"{get_site_name(url)}_{i+1}.png"
-                path = f"screenshots/{filename}"
+                filename = f"screenshots/{get_site_name(url)}_{i+1}.png"
 
-                page.screenshot(path=path, full_page=True)
+                # 🔥 핵심: 분할 캡처
+                fullpage_screenshot(page, filename)
+
                 page.close()
 
-                results.append((url, path))
-                st.success(f"✅ 성공: {url}")
+                results.append((url, filename))
+                st.success(f"✅ 성공")
 
             except Exception as e:
                 results.append((url, None))
-
-                # 🔥 핵심: 에러 표시
-                st.error(f"❌ {url} 실패: {e}")
-                print(f"ERROR: {url} -> {e}")
+                st.error(f"❌ 실패: {e}")
 
         browser.close()
 
     return results
 
-
-# 실행
-if st.button("🚀 캡처 시작"):
+if st.button("🚀 시작"):
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
 
-    if not urls:
-        st.warning("URL을 입력해주세요")
-    else:
-        progress = st.progress(0)
-        status = st.empty()
+    results = capture(urls)
 
-        for i, url in enumerate(urls):
-            status.text(f"[{i+1}/{len(urls)}] 준비 중: {url}")
-            progress.progress(i / len(urls))
+    st.divider()
 
-        results = capture_urls(urls)
-
-        progress.progress(1.0)
-        status.text("✅ 완료!")
-
-        st.divider()
-
-        for url, path in results:
-            st.subheader(url)
-
-            if path and os.path.exists(path):
-                st.image(path)
-
-                with open(path, "rb") as f:
-                    st.download_button(
-                        label="📥 다운로드",
-                        data=f,
-                        file_name=os.path.basename(path),
-                        mime="image/png"
-                    )
-            else:
-                st.error("캡처 실패")
+    for url, path in results:
+        st.subheader(url)
+        if path and os.path.exists(path):
+            st.image(path)
+        else:
+            st.error("캡처 실패")
