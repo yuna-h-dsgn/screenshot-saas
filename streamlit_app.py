@@ -12,15 +12,15 @@ from PIL import Image
 st.set_page_config(page_title="Screenshot SaaS", layout="wide")
 
 st.title("📸 Screenshot SaaS")
-st.caption("무거운 사이트까지 완벽 캡처")
+st.caption("빠른 캡처 + 무거운 사이트 대응")
 
 urls_input = st.text_area("URL 입력", height=200)
 
 def get_site_name(url):
     return urlparse(url).netloc.replace("www.", "").split(".")[0]
 
-# 🔥 핵심: 분할 캡처 함수
-def fullpage_screenshot(page, path):
+# 🔥 분할 캡처
+def scroll_capture(page, path):
     total_height = page.evaluate("document.body.scrollHeight")
     viewport_height = page.viewport_size["height"]
 
@@ -30,7 +30,7 @@ def fullpage_screenshot(page, path):
 
     while y < total_height:
         page.evaluate(f"window.scrollTo(0, {y})")
-        time.sleep(1)
+        time.sleep(0.8)
 
         file = f"{path}_{index}.png"
         page.screenshot(path=file)
@@ -39,7 +39,6 @@ def fullpage_screenshot(page, path):
         y += viewport_height
         index += 1
 
-    # 🔥 이미지 합치기
     images = [Image.open(img) for img in screenshots]
 
     total_width = images[0].width
@@ -54,7 +53,6 @@ def fullpage_screenshot(page, path):
 
     final_image.save(path)
 
-    # 임시 파일 삭제
     for img in screenshots:
         os.remove(img)
 
@@ -83,23 +81,32 @@ def capture(urls):
 
                 page = context.new_page()
 
-                page.goto(url, timeout=60000, wait_until="networkidle")
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
 
-                # 🔥 lazy load 강제 실행
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(2)
-                page.evaluate("window.scrollTo(0, 0)")
                 time.sleep(2)
 
                 filename = f"screenshots/{get_site_name(url)}_{i+1}.png"
 
-                # 🔥 핵심: 분할 캡처
-                fullpage_screenshot(page, filename)
+                # 🔥 1차: 빠른 full_page 시도
+                try:
+                    page.screenshot(path=filename, full_page=True)
+                    st.success(f"⚡ 빠른 캡처 성공")
+
+                except Exception as fast_error:
+                    st.warning(f"⚠️ fallback: 분할 캡처 전환")
+
+                    # 🔥 lazy load 처리
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(2)
+                    page.evaluate("window.scrollTo(0, 0)")
+                    time.sleep(1)
+
+                    # 🔥 2차: 분할 캡처
+                    scroll_capture(page, filename)
+                    st.success(f"🐢 분할 캡처 성공")
 
                 page.close()
-
                 results.append((url, filename))
-                st.success(f"✅ 성공")
 
             except Exception as e:
                 results.append((url, None))
@@ -108,6 +115,7 @@ def capture(urls):
         browser.close()
 
     return results
+
 
 if st.button("🚀 시작"):
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
