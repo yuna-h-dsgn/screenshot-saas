@@ -82,16 +82,22 @@ def capture_urls(urls):
             ]
         )
 
+        # ✅ context 사용 (HTTPS 무시 + UA 설정)
+        context = browser.new_context(
+            ignore_https_errors=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        )
+
         for i, url in enumerate(urls):
             try:
-                page = browser.new_page(
-                    viewport={"width": 1920, "height": 1080}
-                )
+                page = context.new_page()
+                page.set_viewport_size({"width": 1920, "height": 1080})
 
-                page.goto(url, timeout=60000)
+                # ✅ 로딩 안정화
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
 
                 try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
+                    page.wait_for_load_state("networkidle", timeout=10000)
                 except:
                     pass
 
@@ -102,7 +108,7 @@ def capture_urls(urls):
 
                 time.sleep(1)
 
-                # ✅ 사이트명 + 순번으로 파일명 생성
+                # ✅ 사이트명 + 순번 파일명
                 filename = f"{get_site_name(url)}_{i+1}.png"
                 path = f"screenshots/{filename}"
 
@@ -111,15 +117,16 @@ def capture_urls(urls):
 
                 results.append((url, path))
 
-            except Exception:
+            except Exception as e:
                 results.append((url, None))
+                print(f"ERROR: {url} -> {e}")
 
         browser.close()
 
     return results
 
 
-# 버튼 실행
+# 실행
 if st.button("🚀 캡처 시작"):
     urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
 
