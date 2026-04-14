@@ -1,49 +1,41 @@
+import streamlit as st
 from playwright.sync_api import sync_playwright
-import time
 import os
+import time
+import re
 
-URLS = [
-    "https://framacph.com/collections/shop",
-    "https://mokevalley.co.nz/gallery",
-    "https://destroyer.la/",
-    "https://www.ssense.com/ko-kr/editorial/culture/fashion-internet-history",
-    "https://signal-a.studio/",
-    "https://bergerfohr.com/art",
-    "https://advance-copy.com/",
-    "https://paulcalver.cc/"
-]
+st.set_page_config(page_title="Screenshot SaaS", layout="wide")
 
-OUTPUT_DIR = "screenshots"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+st.title("📸 Screenshot SaaS")
+st.caption("여러 웹사이트를 한 번에 캡처합니다")
 
-def safe_wait(page):
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except:
-        pass
-    time.sleep(4)
+urls_input = st.text_area(
+    "URL 입력 (줄바꿈으로 여러 개 입력)",
+    height=200,
+    placeholder="https://example.com\nhttps://google.com"
+)
 
-def remove_popups(page):
-    selectors = [
-        "button:has-text('Accept')",
-        "button:has-text('Agree')",
-        "button:has-text('OK')",
-        "button:has-text('닫기')",
-        "[aria-label='close']",
-        "[data-testid='close']",
-        ".close",
-        ".popup-close"
-    ]
-    for sel in selectors:
+def clean_name(url):
+    return re.sub(r'[^a-zA-Z0-9]', '_', url)[:50]
+
+def close_popups(page):
+    texts = ["accept", "agree", "got it", "close", "확인", "동의"]
+    for text in texts:
         try:
-            page.locator(sel).first.click(timeout=2000)
+            page.locator(f"text={text}").first.click(timeout=1000)
         except:
             pass
 
+    try:
+        page.keyboard.press("Escape")
+    except:
+        pass
+
 def auto_scroll(page):
-    page.evaluate("""
+    try:
+        page.evaluate("""
         async () => {
-            await new Promise((resolve) => {
+            await new Promise(resolve => {
                 let totalHeight = 0;
                 let distance = 500;
                 let timer = setInterval(() => {
@@ -53,50 +45,88 @@ def auto_scroll(page):
                         clearInterval(timer);
                         resolve();
                     }
-                }, 300);
+                }, 200);
             });
         }
-    """)
+        """)
+    except:
+        pass
 
-def capture():
+def capture_urls(urls):
+    results = []
+    os.makedirs("screenshots", exist_ok=True)
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
 
-        page = browser.new_page(
-            viewport={"width": 1920, "height": 1080}
-        )
-
-        for i, url in enumerate(URLS):
-            print(f"📸 {i+1}/{len(URLS)} 캡처 중: {url}")
-
+        for url in urls:
             try:
+                page = browser.new_page(viewport={"width": 1920, "height": 1080})
                 page.goto(url, timeout=60000)
 
-                safe_wait(page)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=15000)
+                except:
+                    pass
 
-                remove_popups(page)
-
-                auto_scroll(page)
                 time.sleep(2)
 
-                page.evaluate("window.scrollTo(0, 0)")
+                close_popups(page)
+                auto_scroll(page)
+
                 time.sleep(1)
 
-                page.screenshot(
-                    path=f"{OUTPUT_DIR}/site_{i+1}.png",
-                    full_page=True
-                )
+                filename = clean_name(url) + ".png"
+                path = f"screenshots/{filename}"
 
-                print("✅ 완료")
+                page.screenshot(path=path, full_page=True)
+                page.close()
 
-            except Exception as e:
-                print(f"❌ 실패: {url}")
-                print(e)
+                results.append((url, path))
+
+            except Exception:
+                results.append((url, None))
 
         browser.close()
 
-if __name__ == "__main__":
-    capture()
+    return results
+
+
+if st.button("🚀 캡처 시작"):
+    urls = [u.strip() for u in urls_input.split("\n") if u.strip()]
+
+    if not urls:
+        st.warning("URL을 입력해주세요")
+    else:
+        progress = st.progress(0)
+        status = st.empty()
+
+        for i, url in enumerate(urls):
+            status.text(f"[{i+1}/{len(urls)}] 준비 중: {url}")
+            progress.progress(i / len(urls))
+
+        results = capture_urls(urls)
+
+        progress.progress(1.0)
+        status.text("✅ 완료!")
+
+        st.divider()
+
+        for url, path in results:
+            st.subheader(url)
+
+            if path and os.path.exists(path):
+                st.image(path)
+
+                with open(path, "rb") as f:
+                    st.download_button(
+                        label="📥 다운로드",
+                        data=f,
+                        file_name=os.path.basename(path),
+                        mime="image/png"
+                    )
+            else:
+                st.error("캡처 실패")
